@@ -1,0 +1,27 @@
+{
+  "name": "nodejs-cli",
+  "version": "1.0.0",
+  "description": "Node.js Todo CLI App",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "todo": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "todo",
+    "cli",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "dotenv": "^17.4.2",
+    "inquirer": "^14.0.2",
+    "nanoid": "^5.1.16",
+    "pg": "^8.22.0"
+  }
+}
