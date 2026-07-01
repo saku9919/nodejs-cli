@@ -1,5 +1,4 @@
 import chalk from 'chalk';
-import { nanoid } from 'nanoid';
 import {
   loadTodos,
   insertTodo,
@@ -19,7 +18,7 @@ function priorityLabel(p) {
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
 export async function addTodo(title, priority = 'medium') {
-  return insertTodo({ id: nanoid(6), title, priority });
+  return insertTodo({ title, priority }); // ID は API 側で自動生成
 }
 
 export async function listTodos(filter = 'all') {

@@ -1,72 +1,140 @@
-import { pool } from './db.js';
+import 'dotenv/config';
 
-// ─── Row mapper ──────────────────────────────────────────────────────────────
+// ─── 内部状態 ────────────────────────────────────────────────────────────────
+
+let _token = null;
+
+function baseUrl() {
+  return process.env.API_BASE_URL || 'http://localhost:3000';
+}
+
+// ─── Row Mapper ───────────────────────────────────────────────────────────────
 
 function rowToTodo(row) {
   return {
     id:        row.id,
     title:     row.title,
-    priority:  row.priority,
-    done:      row.done,
+    priority:  row.priority || 'medium',
+    done:      row.completed,
     createdAt: new Date(row.created_at).toLocaleString('ja-JP'),
-    doneAt:    row.done_at ? new Date(row.done_at).toLocaleString('ja-JP') : null,
+    doneAt:    row.completed_at
+      ? new Date(row.completed_at).toLocaleString('ja-JP')
+      : null,
   };
+}
+
+// ─── HTTP ヘルパー ────────────────────────────────────────────────────────────
+
+async function request(method, path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (_token) headers['Authorization'] = `Bearer ${_token}`;
+
+  const res = await fetch(`${baseUrl()}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `APIエラー: ${res.status}`);
+  return data;
+}
+
+// ─── 認証 ─────────────────────────────────────────────────────────────────────
+
+/**
+ * .env の API_EMAIL / API_PASSWORD でログインする。
+ * ユーザーが存在しない場合は自動的に新規登録してからログインする。
+ */
+export async function loginToAPI() {
+  const email    = process.env.API_EMAIL;
+  const password = process.env.API_PASSWORD;
+
+  if (!email || !password) {
+    throw new Error(
+      'API_EMAIL と API_PASSWORD を .env に設定してください\n' +
+      '  例: API_EMAIL=you@example.com  API_PASSWORD=MyPass1234'
+    );
+  }
+
+  // ─── ログイン試行 ───────────────────────────────────────────────────────
+  const loginRes = await fetch(`${baseUrl()}/api/auth/login`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ email, password }),
+  });
+
+  if (loginRes.ok) {
+    const data = await loginRes.json();
+    _token = data.token;
+    return;
+  }
+
+  const loginData = await loginRes.json();
+
+  // 401 = 認証情報の不一致 → 未登録の可能性があるため新規登録を試みる
+  if (loginRes.status === 401) {
+    const registerRes = await fetch(`${baseUrl()}/api/auth/register`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ email, password }),
+    });
+
+    if (registerRes.ok) {
+      const data = await registerRes.json();
+      _token = data.token;
+      return;
+    }
+
+    const registerData = await registerRes.json();
+    throw new Error(registerData.error || '新規登録に失敗しました');
+  }
+
+  throw new Error(loginData.error || 'ログインに失敗しました');
 }
 
 // ─── READ ────────────────────────────────────────────────────────────────────
 
 export async function loadTodos(filter = 'all') {
-  let query = 'SELECT * FROM todos';
-  if (filter === 'active') query += ' WHERE done = FALSE';
-  if (filter === 'done')   query += ' WHERE done = TRUE';
-  query += ' ORDER BY done ASC, CASE priority WHEN \'high\' THEN 0 WHEN \'medium\' THEN 1 ELSE 2 END ASC, created_at ASC';
+  let url = '/api/todos?limit=100&page=1';
+  if (filter === 'active') url += '&completed=false';
+  if (filter === 'done')   url += '&completed=true';
 
-  const { rows } = await pool.query(query);
-  return rows.map(rowToTodo);
+  const data  = await request('GET', url);
+  const todos = data.todos.map(rowToTodo);
+
+  // 優先度・完了状態でソート（DB側ソートに準拠）
+  const pOrder = { high: 0, medium: 1, low: 2 };
+  return todos.sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    return (pOrder[a.priority] ?? 1) - (pOrder[b.priority] ?? 1);
+  });
 }
 
 // ─── CREATE ──────────────────────────────────────────────────────────────────
 
-export async function insertTodo({ id, title, priority }) {
-  const { rows } = await pool.query(
-    `INSERT INTO todos (id, title, priority)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
-    [id, title, priority]
-  );
-  return rowToTodo(rows[0]);
+export async function insertTodo({ title, priority }) {
+  const data = await request('POST', '/api/todos', { title, priority });
+  return rowToTodo(data.todo);
 }
 
 // ─── UPDATE (complete) ───────────────────────────────────────────────────────
 
 export async function markTodoDone(id) {
-  const { rows } = await pool.query(
-    `UPDATE todos
-     SET done = TRUE, done_at = NOW()
-     WHERE id = $1
-     RETURNING *`,
-    [id]
-  );
-  return rows.length ? rowToTodo(rows[0]) : null;
+  const data = await request('PUT', `/api/todos/${id}`, { completed: true });
+  return rowToTodo(data.todo);
 }
 
 // ─── DELETE (single) ─────────────────────────────────────────────────────────
 
 export async function removeTodo(id) {
-  const { rows } = await pool.query(
-    `DELETE FROM todos
-     WHERE id = $1
-     RETURNING *`,
-    [id]
-  );
-  return rows.length ? rowToTodo(rows[0]) : null;
+  const data = await request('DELETE', `/api/todos/${id}`);
+  return rowToTodo(data.todo);
 }
 
 // ─── DELETE (completed) ──────────────────────────────────────────────────────
 
 export async function removeCompletedTodos() {
-  const { rowCount } = await pool.query(
-    `DELETE FROM todos WHERE done = TRUE`
-  );
-  return rowCount;
+  const data = await request('DELETE', '/api/todos/completed');
+  return data.count;
 }

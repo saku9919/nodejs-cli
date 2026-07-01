@@ -2,7 +2,7 @@
 import 'dotenv/config';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import { initDB } from './db.js';
+import { loginToAPI } from './storage.js';
 import {
   addTodo,
   printTodos,
@@ -98,7 +98,7 @@ async function handleAdd() {
 }
 
 async function handleComplete() {
-  const todos = listTodos('active');
+  const todos = await listTodos('active');
   if (todos.length === 0) {
     console.log(chalk.yellow('\n  完了できるタスクがありません。\n'));
     await pause();
@@ -126,7 +126,7 @@ async function handleComplete() {
 }
 
 async function handleDelete() {
-  const todos = listTodos('all');
+  const todos = await listTodos('all');
   if (todos.length === 0) {
     console.log(chalk.yellow('\n  削除できるタスクがありません。\n'));
     await pause();
@@ -228,10 +228,10 @@ async function pause() {
 
 async function start() {
   try {
-    await initDB();
+    await loginToAPI();
   } catch (err) {
-    console.error(chalk.red.bold('\n  ❌ PostgreSQL 接続エラー:'), err.message);
-    console.error(chalk.dim('  .env ファイルの接続情報を確認してください。'));
+    console.error(chalk.red.bold('\n  ❌ API ログインエラー:'), err.message);
+    console.error(chalk.dim('  .env の API_BASE_URL / API_EMAIL / API_PASSWORD を確認してください。'));
     process.exit(1);
   }
   mainMenu().catch(err => {
